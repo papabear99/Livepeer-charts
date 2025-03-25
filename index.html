@@ -2,54 +2,93 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>Stake Percent Chart</title>
+    <title>Total Stake Over Time</title>
     <!-- Include Chart.js from a CDN -->
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            padding: 20px;
+        }
+
+        #controls {
+            margin-bottom: 20px;
+        }
+    </style>
 </head>
 <body>
-    <h1>Stake Percent Over Time</h1>
+    <h1>Total Stake Over Time</h1>
+    <!-- Time frame selection -->
+    <div id="controls">
+        <label for="timeFrame">Select Time Frame:</label>
+        <select id="timeFrame">
+            <option value="all">All Time</option>
+            <option value="30">Last 30 Days</option>
+            <option value="7">Last 7 Days</option>
+        </select>
+    </div>
+
     <!-- Canvas for Chart.js -->
     <canvas id="stakeChart" width="800" height="400"></canvas>
 
-    <!-- JavaScript to fetch data and render the chart -->
     <script>
-        // Updated fetch function that uses your Cloudflare Worker as a proxy
+        let originalData = [];   // will hold all the data from the API
+        let chartInstance;       // global reference to the Chart.js instance
+
+        // Fetch data via your Cloudflare Worker proxy
         async function fetchData() {
             try {
-                // Use your Cloudflare Worker URL to securely proxy the request.
                 const WORKER_URL = 'https://livepeer-charts.pages.dev';
-
-                const response = await fetch(WORKER_URL, {
-                    method: 'GET'
-                });
-
+                const response = await fetch(WORKER_URL, { method: 'GET' });
                 if (!response.ok) {
                     throw new Error('Network response was not ok');
                 }
-
-                const data = await response.json();
-                return data;
+                const apiData = await response.json();
+                // Adjusting for the data structure returned by the API:
+                // The rows are located at apiData.result.rows
+                return (apiData && apiData.result && apiData.result.rows) || [];
             } catch (error) {
                 console.error('Error fetching data:', error);
                 return [];
             }
         }
 
-        // Process the API data and create the chart.
+        // Convert date string (e.g., "2022-07-10 00:00:00.000 UTC") to a Date object.
+        function parseDate(dateStr) {
+            // Replace " UTC" with "Z" to make it ISO-compatible
+            return new Date(dateStr.replace(" UTC", "Z"));
+        }
+
+        // Filter data by the number of days from the latest date
+        function filterData(data, days) {
+            if (days === 'all') {
+                return data;
+            }
+            const daysInt = parseInt(days);
+            // Assuming data is sorted by date in ascending order.
+            const latestDate = parseDate(data[data.length - 1].date);
+            return data.filter(row => {
+                const rowDate = parseDate(row.date);
+                // Calculate the difference in days
+                const diffDays = (latestDate - rowDate) / (1000 * 60 * 60 * 24);
+                return diffDays <= daysInt;
+            });
+        }
+
+        // Create the chart with given data
         function createChart(data) {
-            // Assuming the API returns an array of objects with 'date' and 'stake_percent'.
-            // Adjust these field names as necessary.
             const labels = data.map(item => item.date);
-            const stakePercentData = data.map(item => item.stake_percent);
+            // Convert the stake (stored as a string) to a float
+            const stakeData = data.map(item => parseFloat(item.staked_amount_LPT));
 
             const ctx = document.getElementById('stakeChart').getContext('2d');
-            new Chart(ctx, {
-                type: 'line', // Change the chart type as needed.
+            chartInstance = new Chart(ctx, {
+                type: 'line',
                 data: {
                     labels: labels,
                     datasets: [{
-                        label: 'Stake Percent',
-                        data: stakePercentData,
+                        label: 'Total Stake (LPT)',
+                        data: stakeData,
                         fill: false,
                         borderColor: 'rgba(75, 192, 192, 1)',
                         tension: 0.1
@@ -62,12 +101,18 @@
                             title: {
                                 display: true,
                                 text: 'Date'
+                            },
+                            ticks: {
+                                // Optionally format date ticks if needed.
+                                autoSkip: true,
+                                maxRotation: 45,
+                                minRotation: 0
                             }
                         },
                         y: {
                             title: {
                                 display: true,
-                                text: 'Stake Percent'
+                                text: 'Total Stake (LPT)'
                             }
                         }
                     }
@@ -75,116 +120,36 @@
             });
         }
 
-        // Initialize the chart by fetching data and rendering it.
-        async function initChart() {
-            const apiData = await fetchData();
-            // Adjust this if your API structure nests the results differently.
-            // For example: const results = apiData.results;
-            if (apiData && apiData.result) {
-                createChart(apiData.result);
-            } else {
-                console.error('No data to display.');
-            }
-        }
-
-        // Start the process.
-        initChart();
-    </script>
-</body>
-</html>
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <title>Stake Percent Chart</title>
-    <!-- Include Chart.js from a CDN -->
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-</head>
-<body>
-    <h1>Stake Percent Over Time</h1>
-    <!-- Canvas for Chart.js -->
-    <canvas id="stakeChart" width="800" height="400"></canvas>
-
-    <!-- JavaScript to fetch data and render the chart -->
-    <script>
-        // Updated fetch function that uses your Cloudflare Worker as a proxy
-        async function fetchData() {
-            try {
-                // Use your Cloudflare Worker URL to securely proxy the request.
-                const WORKER_URL = 'https://livepeer-charts.pages.dev';
-
-                const response = await fetch(WORKER_URL, {
-                    method: 'GET'
-                });
-
-                if (!response.ok) {
-                    throw new Error('Network response was not ok');
-                }
-
-                const data = await response.json();
-                return data;
-            } catch (error) {
-                console.error('Error fetching data:', error);
-                return [];
-            }
-        }
-
-        // Process the API data and create the chart.
-        function createChart(data) {
-            // Assuming the API returns an array of objects with 'date' and 'stake_percent'.
-            // Adjust these field names as necessary.
+        // Update an existing chart with new data
+        function updateChart(data) {
             const labels = data.map(item => item.date);
-            const stakePercentData = data.map(item => item.stake_percent);
+            const stakeData = data.map(item => parseFloat(item.staked_amount_LPT));
+            chartInstance.data.labels = labels;
+            chartInstance.data.datasets[0].data = stakeData;
+            chartInstance.update();
+        }
 
-            const ctx = document.getElementById('stakeChart').getContext('2d');
-            new Chart(ctx, {
-                type: 'line', // Change the chart type as needed.
-                data: {
-                    labels: labels,
-                    datasets: [{
-                        label: 'Stake Percent',
-                        data: stakePercentData,
-                        fill: false,
-                        borderColor: 'rgba(75, 192, 192, 1)',
-                        tension: 0.1
-                    }]
-                },
-                options: {
-                    responsive: true,
-                    scales: {
-                        x: {
-                            title: {
-                                display: true,
-                                text: 'Date'
-                            }
-                        },
-                        y: {
-                            title: {
-                                display: true,
-                                text: 'Stake Percent'
-                            }
-                        }
-                    }
-                }
+        // Initialize the chart by fetching data and setting up event listeners.
+        async function initChart() {
+            const fetchedData = await fetchData();
+            if (fetchedData.length === 0) {
+                console.error('No data to display.');
+                return;
+            }
+            originalData = fetchedData;
+            // Initially, display all data.
+            createChart(originalData);
+
+            // Set up time frame selection event
+            document.getElementById('timeFrame').addEventListener('change', function () {
+                const selectedValue = this.value;
+                const filteredData = filterData(originalData, selectedValue);
+                updateChart(filteredData);
             });
         }
 
-        // Initialize the chart by fetching data and rendering it.
-        async function initChart() {
-            const apiData = await fetchData();
-            // Adjust this if your API structure nests the results differently.
-            // For example: const results = apiData.results;
-            if (apiData && apiData.result) {
-                createChart(apiData.result);
-            } else {
-                console.error('No data to display.');
-            }
-        }
-
-        // Start the process.
+        // Start everything.
         initChart();
     </script>
 </body>
 </html>
-
-
